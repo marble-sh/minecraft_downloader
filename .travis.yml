@@ -1,3 +1,12 @@
 language: rust
 rust:
   - stable
+script:
+  - cargo build --verbose --all --release
+deploy:
+  provider: releases
+  api_key: $GITHUB_TOKEN
+  file: "target/release/minecraft_downloader"
+  skip_cleanup: true
+  on:
+    tags: true
