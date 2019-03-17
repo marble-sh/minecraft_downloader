@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+eula.txt
+logs/
+manifest.json
+*.jar
+server.properties
+version_manifest.json
+
