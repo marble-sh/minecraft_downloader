@@ -7,6 +7,7 @@ rust:
   - stable
 script:
   - cargo metadata --no-deps
+  - cargo check --all --release --all-targets
   - cargo build --verbose --all --release
 before_deploy:
   - mkdir -p target/build
