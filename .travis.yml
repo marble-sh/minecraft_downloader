@@ -5,6 +5,8 @@ os:
 language: rust
 rust:
   - stable
+env:
+  - OPENSSL_STATIC=true
 script:
   - cargo metadata --no-deps
   - cargo check --all --release --all-targets
