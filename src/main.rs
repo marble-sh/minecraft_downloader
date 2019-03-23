@@ -1,21 +1,42 @@
+#[macro_use]
+extern crate clap;
 extern crate crypto;
 extern crate reqwest;
 extern crate serde_json;
 
+use clap::{App, Arg};
 use crypto::digest::Digest;
 use std::io::Read;
 
 const MANIFEST_URL: &'static str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
 
 fn main() -> std::result::Result<(), Box<std::error::Error>> {
-    let mut version: String;
-    let minecraft_version: std::result::Result<String, std::env::VarError> =
-        std::env::var("MINECRAFT_VERSION");
+    let matches = App::new(crate_name!())
+        .version(crate_version!())
+        .author(crate_authors!("\n"))
+        .about(crate_description!())
+        .arg(
+            Arg::with_name("minecraft_version")
+                .short("v")
+                .long("version")
+                .value_name("MINECRAFT_VERSION")
+                .env("MINECRAFT_VERSION")
+                .default_value("latest")
+                .help("Specify the Minecraft server version to download")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("output")
+                .short("o")
+                .long("output")
+                .value_name("OUTPUT")
+                .env("MINECRAFT_FILE")
+                .help("Write to file instead of ./minecraft_server_<version>.jar")
+                .takes_value(true),
+        )
+        .get_matches();
 
-    match minecraft_version {
-        Ok(v) => version = v,
-        Err(_) => version = "latest".to_string(),
-    }
+    let mut version = matches.value_of("minecraft_version").unwrap().to_string();
 
     let mut version_manifest_url: Option<String> = None;
 
@@ -34,9 +55,17 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
         }
 
         for v in v["versions"].as_array().expect("Could not parse manifest") {
-            let ver: String = v["id"].as_str().expect("Could not parse manifest").to_string();
+            let ver: String = v["id"]
+                .as_str()
+                .expect("Could not parse manifest")
+                .to_string();
             if ver == version {
-                version_manifest_url = Some(v["url"].as_str().expect("Could not parse manifest").to_string());
+                version_manifest_url = Some(
+                    v["url"]
+                        .as_str()
+                        .expect("Could not parse manifest")
+                        .to_string(),
+                );
                 break;
             }
         }
@@ -56,9 +85,15 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
             Err(e) => panic!(e),
         };
 
-        let server_sha1sum = v["downloads"]["server"]["sha1"].as_str().expect("Could not parse manifest");
-        let server_size = v["downloads"]["server"]["size"].as_u64().expect("Could not parse manifest");
-        let server_url = v["downloads"]["server"]["url"].as_str().expect("Could not parse manifest");
+        let server_sha1sum = v["downloads"]["server"]["sha1"]
+            .as_str()
+            .expect("Could not parse manifest");
+        let server_size = v["downloads"]["server"]["size"]
+            .as_u64()
+            .expect("Could not parse manifest");
+        let server_url = v["downloads"]["server"]["url"]
+            .as_str()
+            .expect("Could not parse manifest");
 
         println!("Downloading {} bytes from {}", server_size, server_url);
         let mut server_jar_response = reqwest::get(server_url)?;
