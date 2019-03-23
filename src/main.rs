@@ -106,7 +106,10 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
         let hex = hasher.result_str();
         assert_eq!(hex, server_sha1sum);
 
-        let file_name = format!("minecraft_server_{}.jar", version);
+        let file_name = match matches.value_of("output") {
+            None => format!("minecraft_server_{}.jar", version),
+            Some(name) => name.to_string(),
+        };
         std::fs::write(file_name, buf).expect("Unable to save jar file to disk. Out of space?");
     }
 
