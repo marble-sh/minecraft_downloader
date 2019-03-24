@@ -7,6 +7,11 @@ rust:
   - stable
 env:
   - OPENSSL_STATIC=true
+addons:
+  apt:
+    packages:
+    - pkg-config
+    - libssl-dev
 script:
   - cargo metadata --no-deps
   - cargo check --all --release --all-targets
