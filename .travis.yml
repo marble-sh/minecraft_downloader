@@ -8,8 +8,13 @@ rust:
 env:
   - OPENSSL_STATIC=true
 addons:
-  apt:
+  homebrew:
     packages:
+    - openssl@1.1
+  apt:
+    update: true
+    packages:
+    # needed for rust-openssl
     - pkg-config
     - libssl-dev
 script:
@@ -21,7 +26,7 @@ before_deploy:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]];     then mv target/release/minecraft_downloader     target/build/minecraft_downloader_osx; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]];   then mv target/release/minecraft_downloader     target/build/minecraft_downloader_linux; fi
   - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then mv target/release/minecraft_downloader.exe target/build/minecraft_downloader_windows.exe; fi
-  - export TRAVIS_TAG=${TRAVIS_TAG:-$(date +'%Y%m%d')-$(git log --format=%h -1)}
+  - export TRAVIS_TAG=$(date +'%Y%m%d')-$(git log --format=%h -1)
 deploy:
   - provider: releases
     api_key: $GITHUB_TOKEN
