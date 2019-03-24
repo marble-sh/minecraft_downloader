@@ -16,4 +16,7 @@ serde = "1"
 serde_json = "1"
 rust-crypto = "*"
 clap = "2"
+
+# Windows cannot statically link openssl libraries
+[target.'cfg(unix)'.dependencies]
 openssl = { version = "*", features = ["vendored"] }
