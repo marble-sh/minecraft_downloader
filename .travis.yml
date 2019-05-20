@@ -26,9 +26,6 @@ addons:
       - curl
       - jq
 
-before_script:
-  - ./delete_old_release
-
 script:
   - cargo metadata --no-deps
   - cargo check --all --release --all-targets
