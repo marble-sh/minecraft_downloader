@@ -1,12 +1,17 @@
+language: rust
+rust:
+  - stable
+
+cache: cargo
+
 os:
   - osx
   - linux
   - windows
-language: rust
-rust:
-  - stable
+
 env:
   - OPENSSL_STATIC=true
+
 addons:
   homebrew:
     packages:
@@ -14,24 +19,30 @@ addons:
   apt:
     update: true
     packages:
-    # needed for rust-openssl
-    - pkg-config
-    - libssl-dev
+      # needed for rust-openssl
+      - pkg-config
+      - libssl-dev
+      # needed for provision script
+      - curl
+      - jq
+
+before_script:
+  - ./delete_old_release
+
 script:
   - cargo metadata --no-deps
   - cargo check --all --release --all-targets
   - cargo build --verbose --all --release
+
 before_deploy:
-  - mkdir -p target/build
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]];     then mv target/release/minecraft_downloader     target/build/minecraft_downloader_osx; fi
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]];   then mv target/release/minecraft_downloader     target/build/minecraft_downloader_linux; fi
-  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then mv target/release/minecraft_downloader.exe target/build/minecraft_downloader_windows.exe; fi
-  - export TRAVIS_TAG=$(date +'%Y%m%d')-$(git log --format=%h -1)
+  - export TRAVIS_TAG=latest
+  - ./provision
+
 deploy:
-  - provider: releases
-    api_key: $GITHUB_TOKEN
-    file_glob: true
-    file: target/build/*
-    skip_cleanup: true
-    on:
-      branch: master
+  provider: releases
+  api_key: "${GITHUB_API_KEY}"
+  file_glob: true
+  file: target/build/*
+  skip_cleanup: true
+  on:
+    branch: master

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -u
+
+api() {
+    method="$1"
+    endpoint="$2"
+
+    curl -s -X "${method}" -H "Authorization: bearer ${GITHUB_API_KEY}" "${endpoint}"
+}
+
+if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
+    id="$(api GET "${GITHUB_API_ENDPOINT}/repos/${TRAVIS_REPO_SLUG}/releases/tags/latest" | jq --raw-output .id)"
+    if [[ "$id" != "null" ]]; then
+        api DELETE "${GITHUB_API_ENDPOINT}/repos/${TRAVIS_REPO_SLUG}/releases/${id}"
+    fi
+    api DELETE "${GITHUB_API_ENDPOINT}/repos/${TRAVIS_REPO_SLUG}/git/refs/tags/latest"
+fi

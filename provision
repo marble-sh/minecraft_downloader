@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -eu
+
+mkdir -p target/build
+
+if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
+    mv target/release/minecraft_downloader target/build/minecraft_downloader_osx
+fi
+
+if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
+    mv target/release/minecraft_downloader target/build/minecraft_downloader_linux
+fi
+
+if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then
+    mv target/release/minecraft_downloader.exe target/build/minecraft_downloader_windows.exe
+    sha256="$(curl -s -F 'file=@target/build/minecraft_downloader_windows.exe' -F apikey=${VIRUSTOTAL_API_KEY} "${VIRUSTOTAL_API_ENDPOINT}/vtapi/v2/file/scan" | jq --raw-output .sha256)"
+    virustotal_url="https://www.virustotal.com/en/file/${sha256}/analysis/"
+    id="$(curl -s "${GITHUB_API_ENDPOINT}/repos/${TRAVIS_REPO_SLUG}/releases/tags/${TRAVIS_TAG}" | jq --raw-output .id)"
+    curl -s -X PATCH -H "Authorization: bearer ${GITHUB_API_KEY}" "${GITHUB_API_ENDPOINT}/repos/${TRAVIS_REPO_SLUG}/releases/${id}" -d '{"tag_name": "'${TRAVIS_TAG}'", "target_commitish": "master", "name": "'${TRAVIS_TAG}'", "body": "VirusTotal scan for .exe file: '${virustotal_url}'", "draft": false, "prerelease": false}'
+fi

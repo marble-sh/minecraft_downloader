@@ -22,7 +22,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
                 .value_name("MINECRAFT_VERSION")
                 .env("MINECRAFT_VERSION")
                 .default_value("latest")
-                .help("Specify the Minecraft server version to download")
+                .help("the server.jar version to download")
                 .takes_value(true),
         )
         .arg(
@@ -31,13 +31,12 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
                 .long("output")
                 .value_name("OUTPUT")
                 .env("MINECRAFT_FILE")
-                .help("Write to file instead of ./minecraft_server_<version>.jar")
+                .help("where to save server.jar")
                 .takes_value(true),
         )
         .get_matches();
 
     let mut version = matches.value_of("minecraft_version").unwrap().to_string();
-
     let mut version_manifest_url: Option<String> = None;
 
     {
