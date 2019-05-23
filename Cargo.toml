@@ -1,9 +1,9 @@
 [package]
 name = "minecraft_downloader"
-version = "0.1.0"
+description = "Download Minecraft's server.jar file"
+version = "0.1.1"
 authors = ["Caleb Marble <marblenix@users.noreply.github.com>"]
 edition = "2018"
-description = "Download Minecraft's server.jar file"
 homepage = "https://github.com/marblenix/minecraft_downloader"
 repository = "https://github.com/marblenix/minecraft_downloader"
 keywords = ["minecraft", "management", "utility"]
