@@ -4,17 +4,129 @@ extern crate crypto;
 extern crate reqwest;
 extern crate serde_json;
 
-use clap::{App, Arg};
+use clap::Arg;
 use crypto::digest::Digest;
-use std::io::Read;
+use crypto::sha1::Sha1;
 
 const MANIFEST_URL: &'static str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
 
-fn main() -> std::result::Result<(), Box<std::error::Error>> {
-    let matches = App::new(crate_name!())
-        .version(crate_version!())
-        .author(crate_authors!("\n"))
-        .about(crate_description!())
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Manifest {
+    pub latest: Latest,
+    pub versions: Vec<Version>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Latest {
+    pub release: String,
+    pub snapshot: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Version {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub type_field: String,
+    pub url: String,
+    pub time: String,
+    pub release_time: String,
+}
+
+impl Manifest {
+    pub fn get(&self, release_type: Option<&str>, version: Option<&str>) -> Option<Version> {
+        let mut manifest_version: Option<Version> = None;
+
+        let get_latest: bool = (release_type.is_none() && version.is_none())
+            || (release_type.is_some() && version.is_none())
+            || (version.is_some() && version.unwrap().eq("latest"));
+
+        for v in &self.versions {
+            // short-circuit. They know what they want
+            if version.is_some() && version.unwrap().eq(v.id.as_str()) {
+                manifest_version = Some(v.clone());
+                break;
+            }
+
+            if get_latest {
+                if release_type.is_some() && release_type.unwrap().eq("snapshot") {
+                    if v.id == self.latest.snapshot {
+                        manifest_version = Some(v.clone());
+                        break;
+                    }
+                } else {
+                    if v.id == self.latest.release {
+                        manifest_version = Some(v.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        manifest_version
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Release {
+    pub id: String,
+    pub downloads: Downloads,
+    pub main_class: String,
+    pub minimum_launcher_version: i64,
+    pub release_time: String,
+    pub time: String,
+    #[serde(rename = "type")]
+    pub type_field: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Downloads {
+    pub client: Client,
+    #[serde(rename = "client_mappings")]
+    pub client_mappings: ClientMappings,
+    pub server: Server,
+    #[serde(rename = "server_mappings")]
+    pub server_mappings: ServerMappings,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Client {
+    pub sha1: String,
+    pub size: i64,
+    pub url: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientMappings {
+    pub sha1: String,
+    pub size: i64,
+    pub url: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Server {
+    pub sha1: String,
+    pub size: i64,
+    pub url: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerMappings {
+    pub sha1: String,
+    pub size: i64,
+    pub url: String,
+}
+
+fn main() {
+    let matches = app_from_crate!()
         .arg(
             Arg::with_name("minecraft_version")
                 .short("v")
@@ -22,7 +134,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
                 .value_name("MINECRAFT_VERSION")
                 .env("MINECRAFT_VERSION")
                 .default_value("latest")
-                .help("the server.jar version to download")
+                .help("the specific server.jar version to download")
                 .takes_value(true),
         )
         .arg(
@@ -34,83 +146,267 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
                 .help("where to save server.jar")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("release_type")
+                .short("t")
+                .long("type")
+                .value_name("TYPE")
+                .env("MINECRAFT_RELEASE_TYPE")
+                .help("The type of release to download if using the  version.")
+                .default_value("release")
+                .possible_values(&["release", "snapshot"])
+                .takes_value(true),
+        )
         .get_matches();
 
-    let mut version = matches.value_of("minecraft_version").unwrap().to_string();
-    let mut version_manifest_url: Option<String> = None;
+    let version = matches.value_of("minecraft_version");
+    let release_type = matches.value_of("release_type");
 
-    {
-        let resp = reqwest::get(MANIFEST_URL)?.text()?;
-        let v: serde_json::Value = match serde_json::from_str(resp.as_str()) {
-            Ok(json) => json,
-            Err(e) => panic!(e),
-        };
+    let manifest: Manifest = reqwest::blocking::get(MANIFEST_URL)
+        .expect("Failed to fetch manifest")
+        .json::<Manifest>()
+        .expect("Failed to parse json manifest, please file a bug report.");
 
-        if version == "latest" {
-            version = v["latest"]["release"]
-                .as_str()
-                .expect("Could not parse manifest")
-                .to_string();
-        }
+    let minecraft_version: Version = manifest
+        .get(release_type, version)
+        .expect(format!("Version {:?} was not found in manifest", version).as_ref());
 
-        for v in v["versions"].as_array().expect("Could not parse manifest") {
-            let ver: String = v["id"]
-                .as_str()
-                .expect("Could not parse manifest")
-                .to_string();
-            if ver == version {
-                version_manifest_url = Some(
-                    v["url"]
-                        .as_str()
-                        .expect("Could not parse manifest")
-                        .to_string(),
-                );
-                break;
-            }
-        }
+    println!("Found Minecraft version {:?}", minecraft_version.id);
+    let versioned_manifest: Release = reqwest::blocking::get(&minecraft_version.url)
+        .expect("failed to download version manifest")
+        .json::<Release>()
+        .expect("Failed to parse release json manifest, please file a bug report.");
+
+    println!(
+        "Downloading {} bytes from {}",
+        versioned_manifest.downloads.server.size, versioned_manifest.downloads.server.url
+    );
+
+    let jar = reqwest::blocking::get(versioned_manifest.downloads.server.url.as_str())
+        .expect("Failed to download minecraft server jar")
+        .bytes()
+        .expect("Failed to read minecraft server jar, please file a bug report.");
+
+    let mut hasher: Sha1 = crypto::sha1::Sha1::new();
+    hasher.input(&jar);
+    let hex: String = hasher.result_str();
+
+    if versioned_manifest.downloads.server.sha1 != hex {
+        panic!("Shasum check failed, please file a bug report.")
     }
 
-    {
-        let url: String;
-        match version_manifest_url {
-            None => panic!(format!("Version {} was not found in manifest", version)),
-            Some(u) => url = u,
-        }
+    let file_name = match matches.value_of("output") {
+        None => format!("minecraft_server_{}.jar", minecraft_version.id),
+        Some(name) => name.to_string(),
+    };
 
-        println!("found Minecraft version {}", version);
-        let versioned_manifest_resp: String = reqwest::get(url.as_str())?.text()?;
-        let v: serde_json::Value = match serde_json::from_str(versioned_manifest_resp.as_str()) {
-            Ok(json) => json,
-            Err(e) => panic!(e),
+    std::fs::write(file_name, jar).expect("Unable to save jar file to disk. Out of space?");
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Latest, Manifest, Version};
+
+    #[test]
+    fn get_version_no_args() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.15.2".to_string(),
+            type_field: "release".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
         };
-
-        let server_sha1sum = v["downloads"]["server"]["sha1"]
-            .as_str()
-            .expect("Could not parse manifest");
-        let server_size = v["downloads"]["server"]["size"]
-            .as_u64()
-            .expect("Could not parse manifest");
-        let server_url = v["downloads"]["server"]["url"]
-            .as_str()
-            .expect("Could not parse manifest");
-
-        println!("Downloading {} bytes from {}", server_size, server_url);
-        let mut server_jar_response = reqwest::get(server_url)?;
-
-        let mut hasher = crypto::sha1::Sha1::new();
-        let mut buf: Vec<u8> = Vec::new();
-        server_jar_response.read_to_end(&mut buf)?;
-
-        hasher.input(&mut buf);
-        let hex = hasher.result_str();
-        assert_eq!(hex, server_sha1sum);
-
-        let file_name = match matches.value_of("output") {
-            None => format!("minecraft_server_{}.jar", version),
-            Some(name) => name.to_string(),
-        };
-        std::fs::write(file_name, buf).expect("Unable to save jar file to disk. Out of space?");
+        let actual: Option<Version> = manifest.get(None, None);
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
     }
 
-    Ok(())
+    #[test]
+    fn get_version_with_version_latest() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.15.2".to_string(),
+            type_field: "release".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(None, Some("latest"));
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_release_latest() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.15.2".to_string(),
+            type_field: "release".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(Some("release"), None);
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_release_latest_snapshot() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.16-pre2".to_string(),
+            type_field: "snapshot".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(Some("snapshot"), None);
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_release_latest_version_latest() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.15.2".to_string(),
+            type_field: "release".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(Some("release"), Some("latest"));
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_release_latest_release_version_latest_snapshot() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.16-pre2".to_string(),
+            type_field: "snapshot".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(Some("release"), Some("1.16-pre2"));
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_release_latest_snapshot_version_latest_release() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.15.2".to_string(),
+            type_field: "release".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(Some("snapshot"), Some("1.15.2"));
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_version_args() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.15.2".to_string(),
+            type_field: "release".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(None, Some("1.15.2"));
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_version_args_lower() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.14.4".to_string(),
+            type_field: "release".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(None, Some("1.14.4"));
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_version_args_lower_snapshot() {
+        let manifest: Manifest = test_manifest();
+        let expected: Version = Version {
+            id: "1.14-pre7".to_string(),
+            type_field: "snapshot".to_string(),
+            url: "".to_string(),
+            time: "".to_string(),
+            release_time: "".to_string(),
+        };
+        let actual: Option<Version> = manifest.get(None, Some("1.14-pre7"));
+        assert!(actual.is_some());
+        assert_eq!(expected, actual.unwrap());
+    }
+
+    #[test]
+    fn get_version_with_version_args_does_not_exist() {
+        let manifest: Manifest = test_manifest();
+        let actual: Option<Version> = manifest.get(None, Some("foobar"));
+        assert!(actual.is_none());
+    }
+
+    fn test_manifest() -> Manifest {
+        Manifest {
+            latest: Latest {
+                release: "1.15.2".to_string(),
+                snapshot: "1.16-pre2".to_string(),
+            },
+            versions: vec![
+                Version {
+                    id: "1.16-pre2".to_string(),
+                    type_field: "snapshot".to_string(),
+                    url: "".to_string(),
+                    time: "".to_string(),
+                    release_time: "".to_string(),
+                },
+                Version {
+                    id: "1.16-pre1".to_string(),
+                    type_field: "snapshot".to_string(),
+                    url: "".to_string(),
+                    time: "".to_string(),
+                    release_time: "".to_string(),
+                },
+                Version {
+                    id: "1.15.2".to_string(),
+                    type_field: "release".to_string(),
+                    url: "".to_string(),
+                    time: "".to_string(),
+                    release_time: "".to_string(),
+                },
+                Version {
+                    id: "1.14.4".to_string(),
+                    type_field: "release".to_string(),
+                    url: "".to_string(),
+                    time: "".to_string(),
+                    release_time: "".to_string(),
+                },
+                Version {
+                    id: "1.14-pre7".to_string(),
+                    type_field: "snapshot".to_string(),
+                    url: "".to_string(),
+                    time: "".to_string(),
+                    release_time: "".to_string(),
+                },
+            ],
+        }
+    }
 }
