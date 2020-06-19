@@ -3,10 +3,15 @@ extern crate clap;
 extern crate crypto;
 extern crate reqwest;
 extern crate serde_json;
+extern crate futures;
+extern crate futures_core;
+extern crate futures_util;
+extern crate tokio;
 
+use bytes::Bytes;
 use clap::Arg;
 use crypto::digest::Digest;
-use crypto::sha1::Sha1;
+use futures_util::StreamExt;
 
 const MANIFEST_URL: &'static str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
 
@@ -125,6 +130,38 @@ pub struct ServerMappings {
     pub url: String,
 }
 
+async fn download_jar(file_name: &str, url: &str, sha: &str) {
+    let mut stream = reqwest::get(url)
+        .await
+        .expect("Failed to download jar file")
+        .bytes_stream();
+
+    {
+        use crypto::sha1::Sha1;
+        use std::fs::OpenOptions;
+        use std::io::prelude::*;
+
+        let mut hasher: Sha1 = Sha1::new();
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(file_name)
+            .expect(format!("Failed to open {}", file_name).as_str());
+
+        while let Some(block) = stream.next().await {
+            let b: Bytes = block.expect("Unable to download jar file.");
+            hasher.input(b.as_ref());
+            file.write(b.as_ref()).expect(format!("Failed to write to file {}", file_name).as_str());
+        }
+
+        if sha != hasher.result_str() {
+            panic!("Shasum check failed, please file a bug report.")
+        }
+    }
+}
+
 fn main() {
     let matches = app_from_crate!()
         .arg(
@@ -182,25 +219,20 @@ fn main() {
         versioned_manifest.downloads.server.size, versioned_manifest.downloads.server.url
     );
 
-    let jar = reqwest::blocking::get(versioned_manifest.downloads.server.url.as_str())
-        .expect("Failed to download minecraft server jar")
-        .bytes()
-        .expect("Failed to read minecraft server jar, please file a bug report.");
-
-    let mut hasher: Sha1 = crypto::sha1::Sha1::new();
-    hasher.input(&jar);
-    let hex: String = hasher.result_str();
-
-    if versioned_manifest.downloads.server.sha1 != hex {
-        panic!("Shasum check failed, please file a bug report.")
-    }
-
     let file_name = match matches.value_of("output") {
         None => format!("minecraft_server_{}.jar", minecraft_version.id),
         Some(name) => name.to_string(),
     };
 
-    std::fs::write(file_name, jar).expect("Unable to save jar file to disk. Out of space?");
+    tokio::runtime::Runtime::new()
+        .expect("Failed to create Tokio runtime.")
+        .block_on(
+            download_jar(
+                file_name.as_str(),
+                versioned_manifest.downloads.server.url.as_str(),
+                versioned_manifest.downloads.server.sha1.as_str(),
+            )
+        );
 }
 
 #[cfg(test)]
