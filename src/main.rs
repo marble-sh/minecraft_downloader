@@ -57,11 +57,7 @@ pub struct Release {
 #[serde(rename_all = "camelCase")]
 pub struct Downloads {
     pub client: Client,
-    #[serde(rename = "client_mappings")]
-    pub client_mappings: ClientMappings,
     pub server: Server,
-    #[serde(rename = "server_mappings")]
-    pub server_mappings: ServerMappings,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
@@ -74,23 +70,7 @@ pub struct Client {
 
 #[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClientMappings {
-    pub sha1: String,
-    pub size: i64,
-    pub url: String,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Server {
-    pub sha1: String,
-    pub size: i64,
-    pub url: String,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerMappings {
     pub sha1: String,
     pub size: i64,
     pub url: String,
@@ -164,7 +144,8 @@ async fn download_jar(file_name: &str, url: &str, sha: &str) {
 }
 
 fn main() {
-    let matches = App::from_yaml(load_yaml!("args.yml"))
+    let yaml = load_yaml!("args.yml");
+    let matches = App::from_yaml(yaml)
         .version(crate_version!())
         .about(crate_description!())
         .get_matches();
