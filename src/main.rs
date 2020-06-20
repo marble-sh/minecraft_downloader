@@ -1,15 +1,15 @@
 #[macro_use]
 extern crate clap;
 extern crate crypto;
-extern crate reqwest;
-extern crate serde_json;
 extern crate futures;
 extern crate futures_core;
 extern crate futures_util;
+extern crate reqwest;
+extern crate serde_json;
 extern crate tokio;
 
 use bytes::Bytes;
-use clap::Arg;
+use clap::App;
 use crypto::digest::Digest;
 use futures_util::StreamExt;
 
@@ -38,40 +38,6 @@ pub struct Version {
     pub url: String,
     pub time: String,
     pub release_time: String,
-}
-
-impl Manifest {
-    pub fn get(&self, release_type: Option<&str>, version: Option<&str>) -> Option<Version> {
-        let mut manifest_version: Option<Version> = None;
-
-        let get_latest: bool = (release_type.is_none() && version.is_none())
-            || (release_type.is_some() && version.is_none())
-            || (version.is_some() && version.unwrap().eq("latest"));
-
-        for v in &self.versions {
-            // short-circuit. They know what they want
-            if version.is_some() && version.unwrap().eq(v.id.as_str()) {
-                manifest_version = Some(v.clone());
-                break;
-            }
-
-            if get_latest {
-                if release_type.is_some() && release_type.unwrap().eq("snapshot") {
-                    if v.id == self.latest.snapshot {
-                        manifest_version = Some(v.clone());
-                        break;
-                    }
-                } else {
-                    if v.id == self.latest.release {
-                        manifest_version = Some(v.clone());
-                        break;
-                    }
-                }
-            }
-        }
-
-        manifest_version
-    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
@@ -130,6 +96,40 @@ pub struct ServerMappings {
     pub url: String,
 }
 
+impl Manifest {
+    pub fn get(&self, release_type: Option<&str>, version: Option<&str>) -> Option<Version> {
+        let mut manifest_version: Option<Version> = None;
+
+        let get_latest: bool = (release_type.is_none() && version.is_none())
+            || (release_type.is_some() && version.is_none())
+            || (version.is_some() && version.unwrap().eq("latest"));
+
+        for v in &self.versions {
+            // short-circuit. They know what they want
+            if version.is_some() && version.unwrap().eq(v.id.as_str()) {
+                manifest_version = Some(v.clone());
+                break;
+            }
+
+            if get_latest {
+                if release_type.is_some() && release_type.unwrap().eq("snapshot") {
+                    if v.id == self.latest.snapshot {
+                        manifest_version = Some(v.clone());
+                        break;
+                    }
+                } else {
+                    if v.id == self.latest.release {
+                        manifest_version = Some(v.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        manifest_version
+    }
+}
+
 async fn download_jar(file_name: &str, url: &str, sha: &str) {
     let mut stream = reqwest::get(url)
         .await
@@ -153,47 +153,20 @@ async fn download_jar(file_name: &str, url: &str, sha: &str) {
         while let Some(block) = stream.next().await {
             let b: Bytes = block.expect("Unable to download jar file.");
             hasher.input(b.as_ref());
-            file.write(b.as_ref()).expect(format!("Failed to write to file {}", file_name).as_str());
+            file.write(b.as_ref())
+                .expect(format!("Failed to write to file {}", file_name).as_str());
         }
 
         if sha != hasher.result_str() {
-            panic!("Shasum check failed, please file a bug report.")
+            panic!("Shasum check failed, please retry the download.")
         }
     }
 }
 
 fn main() {
-    let matches = app_from_crate!()
-        .arg(
-            Arg::with_name("minecraft_version")
-                .short("v")
-                .long("version")
-                .value_name("MINECRAFT_VERSION")
-                .env("MINECRAFT_VERSION")
-                .default_value("latest")
-                .help("the specific server.jar version to download")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("output")
-                .short("o")
-                .long("output")
-                .value_name("OUTPUT")
-                .env("MINECRAFT_FILE")
-                .help("where to save server.jar")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("release_type")
-                .short("t")
-                .long("type")
-                .value_name("TYPE")
-                .env("MINECRAFT_RELEASE_TYPE")
-                .help("The type of release to download if using the  version.")
-                .default_value("release")
-                .possible_values(&["release", "snapshot"])
-                .takes_value(true),
-        )
+    let matches = App::from_yaml(load_yaml!("args.yml"))
+        .version(crate_version!())
+        .about(crate_description!())
         .get_matches();
 
     let version = matches.value_of("minecraft_version");
@@ -218,7 +191,6 @@ fn main() {
         "Downloading {} bytes from {}",
         versioned_manifest.downloads.server.size, versioned_manifest.downloads.server.url
     );
-
     let file_name = match matches.value_of("output") {
         None => format!("minecraft_server_{}.jar", minecraft_version.id),
         Some(name) => name.to_string(),
@@ -226,13 +198,11 @@ fn main() {
 
     tokio::runtime::Runtime::new()
         .expect("Failed to create Tokio runtime.")
-        .block_on(
-            download_jar(
-                file_name.as_str(),
-                versioned_manifest.downloads.server.url.as_str(),
-                versioned_manifest.downloads.server.sha1.as_str(),
-            )
-        );
+        .block_on(download_jar(
+            file_name.as_str(),
+            versioned_manifest.downloads.server.url.as_str(),
+            versioned_manifest.downloads.server.sha1.as_str(),
+        ));
 }
 
 #[cfg(test)]
