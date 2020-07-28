@@ -1,0 +1,27 @@
+name: Minecraft Downloader
+args:
+  - minecraft_version:
+      default_value: latest
+      env: MINECRAFT_VERSION
+      help: the specific version to download
+      long: version
+      short: v
+      takes_value: true
+      value_name: MINECRAFT_VERSION
+  - output:
+      default_value: latest
+      env: OUTPUT
+      help: where to save the jar file
+      long: output
+      short: o
+      takes_value: true
+      value_name: OUTPUT
+  - release_type:
+      default_value: release
+      env: MINECRAFT_RELEASE_TYPE
+      help: the type of release to download, only useful if version is "latest"
+      long: type
+      possible_values: [release, snapshot]
+      short: t
+      takes_value: true
+      value_name: TYPE

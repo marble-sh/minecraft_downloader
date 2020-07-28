@@ -1,0 +1,54 @@
+language: rust
+rust:
+  - stable
+
+cache: cargo
+
+os:
+  - osx
+  - linux
+  - windows
+
+env:
+  - OPENSSL_STATIC=true
+
+addons:
+  homebrew:
+    packages:
+    - openssl@1.1
+  apt:
+    update: true
+    packages:
+      # needed for rust-openssl
+      - pkg-config
+      - libssl-dev
+      # needed for provision script
+      - curl
+      - jq
+
+before_install:
+  - |-
+    case $TRAVIS_OS_NAME in
+      windows)
+        rustup default stable-x86_64-pc-windows-msvc
+        ;;
+    esac
+  - ./.travis/clean_release
+
+script:
+  - cargo metadata --no-deps
+  - cargo check --all --release --all-targets
+  - cargo build --verbose --all --release
+
+before_deploy:
+  - export TRAVIS_TAG=latest
+  - ./.travis/provision
+
+deploy:
+  provider: releases
+  api_key: "${GITHUB_API_KEY}"
+  file_glob: true
+  file: target/build/*
+  skip_cleanup: true
+  on:
+    branch: master
