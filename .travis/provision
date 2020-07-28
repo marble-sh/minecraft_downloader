@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+mkdir -p target/build
+
+json_encode() {
+    printf '%s' "$1" | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+}
+
+if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
+    mv target/release/minecraft_downloader target/build/minecraft_downloader_osx
+fi
+
+if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
+    mv target/release/minecraft_downloader target/build/minecraft_downloader_linux
+fi
+
+if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then
+    mv target/release/minecraft_downloader.exe target/build/minecraft_downloader_windows.exe
+    sha256="$(curl -s -F 'file=@target/build/minecraft_downloader_windows.exe' -F apikey=${VIRUSTOTAL_API_KEY} "${VIRUSTOTAL_API_ENDPOINT}/vtapi/v2/file/scan" | jq --raw-output .sha256)"
+    id="$(curl -s "${GITHUB_API_ENDPOINT}/repos/${TRAVIS_REPO_SLUG}/releases/tags/${TRAVIS_TAG}" | jq --raw-output .id)"
+
+    IFS='' read -r -d '' body <<EOF
+$(git log -1 --pretty="format:%B")
+
+---
+VirusTotal scan for .exe file: https://www.virustotal.com/en/file/${sha256}/analysis
+EOF
+    encoded_body="$(json_encode "${body}" | sed -e 's/\\n/\\r\\n/g' -e 's/"//g')"
+    curl -s -X PATCH \
+        -H "Content-Type: application/json; charset=utf-8" \
+        -H "Authorization: bearer ${GITHUB_API_KEY}" \
+        "${GITHUB_API_ENDPOINT}/repos/${TRAVIS_REPO_SLUG}/releases/${id}" \
+        -d '{"target_commitish": "master", "body": "'"${encoded_body}"'"}'
+fi
