@@ -92,15 +92,28 @@ impl Manifest {
             }
 
             if get_latest {
-                if release_type.is_some() && release_type.unwrap().eq("snapshot") {
-                    if v.id == self.latest.snapshot {
-                        manifest_version = Some(v.clone());
-                        break;
+                match release_type {
+                    Some(release_type) => {
+                        match release_type {
+                            "snapshot" => {
+                                if v.id == self.latest.snapshot {
+                                    manifest_version = Some(v.clone());
+                                    break;
+                                }
+                            },
+                            "release" | _ => {
+                                if v.id == self.latest.release {
+                                    manifest_version = Some(v.clone());
+                                    break;
+                                }
+                            }
+                        }
                     }
-                } else {
-                    if v.id == self.latest.release {
-                        manifest_version = Some(v.clone());
-                        break;
+                    None => {
+                        if v.id == self.latest.release {
+                            manifest_version = Some(v.clone());
+                            break;
+                        }
                     }
                 }
             }
@@ -152,21 +165,31 @@ fn main() {
 
     let version = matches.value_of("minecraft_version");
     let release_type = matches.value_of("release_type");
+    let no_download = matches.is_present("no_download");
 
     let manifest: Manifest = reqwest::blocking::get(MANIFEST_URL)
         .expect("Failed to fetch manifest")
         .json::<Manifest>()
-        .expect("Failed to parse json manifest, please file a bug report.");
+        .expect("Failed to parse json manifest, please file a bug report.\n\
+        https://github.com/marblenix/minecraft_downloader/issues/new\
+        ?assignees=marblenix&labels=bug,manifest&template=bug_report.md&title=Invalid%20Manifest\n");
 
     let minecraft_version: Version = manifest
         .get(release_type, version)
         .expect(format!("Version {:?} was not found in manifest", version).as_ref());
 
+    if no_download {
+        println!("{}", minecraft_version.id);
+        std::process::exit(0);
+    }
+
     println!("Found Minecraft version {:?}", minecraft_version.id);
     let versioned_manifest: Release = reqwest::blocking::get(&minecraft_version.url)
         .expect("failed to download version manifest")
         .json::<Release>()
-        .expect("Failed to parse release json manifest, please file a bug report.");
+        .expect("Failed to parse release json manifest, please file a bug report.\n\
+        https://github.com/marblenix/minecraft_downloader/issues/new\
+        ?assignees=marblenix&labels=bug,manifest&template=bug_report.md&title=Invalid%20Manifest\n");
 
     println!(
         "Downloading {} bytes from {}",
@@ -178,7 +201,7 @@ fn main() {
     };
 
     tokio::runtime::Runtime::new()
-        .expect("Failed to create Tokio runtime.")
+        .expect("Failed to create Tokio runtime")
         .block_on(download_jar(
             file_name.as_str(),
             versioned_manifest.downloads.server.url.as_str(),
@@ -345,6 +368,15 @@ mod tests {
         let manifest: Manifest = test_manifest();
         let actual: Option<Version> = manifest.get(None, Some("foobar"));
         assert!(actual.is_none());
+    }
+
+    #[test]
+    fn get_latest_snapshot_when_no_new_snapshot_is_available() {
+        let mut manifest: Manifest = test_manifest();
+        manifest.latest.snapshot = manifest.latest.release.clone();
+        let actual: Option<Version> = manifest.get(Some("snapshot"), Some("latest"));
+        assert!(actual.is_some());
+        assert_eq!(manifest.latest.release, actual.unwrap().id);
     }
 
     fn test_manifest() -> Manifest {

@@ -10,7 +10,7 @@ args:
       value_name: MINECRAFT_VERSION
   - output:
       default_value: latest
-      env: OUTPUT
+      env: MINECRAFT_OUTPUT
       help: where to save the jar file
       long: output
       short: o
@@ -19,9 +19,14 @@ args:
   - release_type:
       default_value: release
       env: MINECRAFT_RELEASE_TYPE
-      help: the type of release to download, only useful if version is "latest"
+      help: the type of release to download, only used if version is "latest"
       long: type
       possible_values: [release, snapshot]
       short: t
       takes_value: true
       value_name: TYPE
+  - no_download:
+      help: do not download the latest .jar, instead output only the found version
+      long: no-download
+      short: n
+      takes_value: false
