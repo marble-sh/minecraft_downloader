@@ -18,10 +18,9 @@ FLAGS:
 
 OPTIONS:
     -v, --version <MINECRAFT_VERSION>    the specific version to download [env: MINECRAFT_VERSION=]  [default: latest]
-    -o, --output <OUTPUT>                where to save the jar file [env: OUTPUT=]  [default: latest]
-    -t, --type <TYPE>                    the type of release to download, only useful if version is "latest" [env:
-                                         MINECRAFT_RELEASE_TYPE=]  [default: release]  [possible values: release,
-                                         snapshot]
+    -n, --no-download                    do not download the latest .jar, instead output only the found version
+    -o, --output <OUTPUT>                where to save the jar file [env: MINECRAFT_OUTPUT=]  [default: latest]
+    -t, --type <TYPE>                    the type of release to download, only used if version is "latest" [env: MINECRAFT_RELEASE_TYPE=]  [default: release]  [possible values: release, snapshot]
 ```
 
 Examples:
