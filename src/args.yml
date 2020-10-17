@@ -9,7 +9,6 @@ args:
       takes_value: true
       value_name: MINECRAFT_VERSION
   - output:
-      default_value: latest
       env: MINECRAFT_OUTPUT
       help: where to save the jar file
       long: output
