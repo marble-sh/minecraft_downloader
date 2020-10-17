@@ -1,35 +1,32 @@
 #[macro_use]
 extern crate clap;
 extern crate crypto;
-extern crate futures;
-extern crate futures_core;
-extern crate futures_util;
 extern crate reqwest;
 extern crate serde_json;
-extern crate tokio;
 
-use bytes::Bytes;
+use bytes::buf::BufExt;
+use bytes::{Buf, Bytes};
 use clap::App;
 use crypto::digest::Digest;
-use futures_util::StreamExt;
+use serde_derive::{Deserialize, Serialize};
 
-const MANIFEST_URL: &'static str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
+const MANIFEST_URL: &str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
 
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub latest: Latest,
     pub versions: Vec<Version>,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Latest {
     pub release: String,
     pub snapshot: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Version {
     pub id: String,
@@ -40,7 +37,7 @@ pub struct Version {
     pub release_time: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Release {
     pub id: String,
@@ -53,14 +50,14 @@ pub struct Release {
     pub type_field: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Downloads {
     pub client: Client,
     pub server: Server,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Client {
     pub sha1: String,
@@ -68,7 +65,7 @@ pub struct Client {
     pub url: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Server {
     pub sha1: String,
@@ -93,22 +90,24 @@ impl Manifest {
 
             if get_latest {
                 match release_type {
-                    Some(release_type) => {
-                        match release_type {
-                            "snapshot" => {
-                                if v.id == self.latest.snapshot {
-                                    manifest_version = Some(v.clone());
-                                    break;
-                                }
-                            },
-                            "release" | _ => {
-                                if v.id == self.latest.release {
-                                    manifest_version = Some(v.clone());
-                                    break;
-                                }
+                    Some(release_type) => match release_type {
+                        "snapshot" => {
+                            if v.id == self.latest.snapshot {
+                                manifest_version = Some(v.clone());
+                                break;
                             }
                         }
-                    }
+                        "release" => {
+                            if v.id == self.latest.release {
+                                manifest_version = Some(v.clone());
+                                break;
+                            }
+                        }
+                        _ => {
+                            manifest_version = Some(v.clone());
+                            break;
+                        }
+                    },
                     None => {
                         if v.id == self.latest.release {
                             manifest_version = Some(v.clone());
@@ -123,60 +122,56 @@ impl Manifest {
     }
 }
 
-async fn download_jar(file_name: &str, url: &str, sha: &str) {
-    let mut stream = reqwest::get(url)
-        .await
-        .expect("Failed to download jar file")
-        .bytes_stream();
+fn download_jar(file_name: &str, url: &str, sha: &str) {
+    use crypto::sha1::Sha1;
+    use std::{fs::OpenOptions, io::copy};
 
-    {
-        use crypto::sha1::Sha1;
-        use std::fs::OpenOptions;
-        use std::io::prelude::*;
+    let resp: Bytes = reqwest::blocking::get(url)
+        .expect("Failed to fetch server jar")
+        .bytes()
+        .expect("Failed to extract server jar");
 
-        let mut hasher: Sha1 = Sha1::new();
+    let jar: &[u8] = resp.bytes();
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open(file_name)
-            .expect(format!("Failed to open {}", file_name).as_str());
-
-        while let Some(block) = stream.next().await {
-            let b: Bytes = block.expect("Unable to download jar file.");
-            hasher.input(b.as_ref());
-            file.write(b.as_ref())
-                .expect(format!("Failed to write to file {}", file_name).as_str());
-        }
-
-        if sha != hasher.result_str() {
-            panic!("Shasum check failed, please retry the download.")
-        }
+    let mut hasher: Sha1 = Sha1::new();
+    hasher.input(jar);
+    if sha != hasher.result_str() {
+        panic!("Shasum check failed, please retry the download.")
     }
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open(file_name)
+        .unwrap_or_else(|_| panic!("Failed to open {}", file_name));
+
+    copy(&mut resp.reader(), &mut file).expect("failed to copy content");
 }
 
 fn main() {
     let yaml = load_yaml!("args.yml");
-    let matches = App::from_yaml(yaml)
+    let args = App::from_yaml(yaml)
         .version(crate_version!())
         .about(crate_description!())
         .get_matches();
 
-    let version = matches.value_of("minecraft_version");
-    let release_type = matches.value_of("release_type");
-    let no_download = matches.is_present("no_download");
+    let version = args.value_of("minecraft_version");
+    let release_type = args.value_of("release_type");
+    let no_download = args.is_present("no_download");
 
     let manifest: Manifest = reqwest::blocking::get(MANIFEST_URL)
         .expect("Failed to fetch manifest")
         .json::<Manifest>()
-        .expect("Failed to parse json manifest, please file a bug report.\n\
+        .expect(
+            "Failed to parse json manifest, please file a bug report.\n\
         https://github.com/marblenix/minecraft_downloader/issues/new\
-        ?assignees=marblenix&labels=bug,manifest&template=bug_report.md&title=Invalid%20Manifest\n");
+        ?assignees=marblenix&labels=bug,manifest&template=bug_report.md&title=Invalid%20Manifest\n",
+        );
 
     let minecraft_version: Version = manifest
         .get(release_type, version)
-        .expect(format!("Version {:?} was not found in manifest", version).as_ref());
+        .unwrap_or_else(|| panic!("Version {:?} was not found in manifest", version));
 
     if no_download {
         println!("{}", minecraft_version.id);
@@ -187,26 +182,29 @@ fn main() {
     let versioned_manifest: Release = reqwest::blocking::get(&minecraft_version.url)
         .expect("failed to download version manifest")
         .json::<Release>()
-        .expect("Failed to parse release json manifest, please file a bug report.\n\
+        .expect(
+            "Failed to parse release json manifest, please file a bug report.\n\
         https://github.com/marblenix/minecraft_downloader/issues/new\
-        ?assignees=marblenix&labels=bug,manifest&template=bug_report.md&title=Invalid%20Manifest\n");
+        ?assignees=marblenix&labels=bug,manifest&template=bug_report.md&title=Invalid%20Manifest\n",
+        );
 
-    println!(
-        "Downloading {} bytes from {}",
-        versioned_manifest.downloads.server.size, versioned_manifest.downloads.server.url
-    );
-    let file_name = match matches.value_of("output") {
+    let file_name = match args.value_of("output") {
         None => format!("minecraft_server_{}.jar", minecraft_version.id),
         Some(name) => name.to_string(),
     };
 
-    tokio::runtime::Runtime::new()
-        .expect("Failed to create Tokio runtime")
-        .block_on(download_jar(
-            file_name.as_str(),
-            versioned_manifest.downloads.server.url.as_str(),
-            versioned_manifest.downloads.server.sha1.as_str(),
-        ));
+    println!("Saving minecraft .jar as {}", file_name);
+
+    println!(
+        "Downloading {} bytes from {}...",
+        versioned_manifest.downloads.server.size, versioned_manifest.downloads.server.url
+    );
+
+    download_jar(
+        file_name.as_str(),
+        versioned_manifest.downloads.server.url.as_str(),
+        versioned_manifest.downloads.server.sha1.as_str(),
+    );
 }
 
 #[cfg(test)]
