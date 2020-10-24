@@ -1,10 +1,8 @@
 name: Rust
 
 on:
-  push:
-    branches: [ master ]
   pull_request:
-    branches: [ master ]
+    branches: master
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,7 +10,11 @@ env:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
 
     steps:
       - uses: actions/checkout@v2
@@ -21,14 +23,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check project
-        run: cargo check --verbose --workspace --all-targets --all-features
-
-      - name: Check Build
-        run: cargo build --verbose
+        run: cargo check --release --verbose --workspace --all-targets --all-features
 
       - name: Check tests
-        run: cargo test --verbose
+        run: cargo test --release --verbose
+
+      - name: Check Build
+        run: cargo build --release --verbose
 
       - name: Check installation from source
-        run: cargo install --path .
-
+        run: cargo install --verbose --all-features --path . --root install

@@ -1,0 +1,108 @@
+name: Rust Release
+
+on:
+  push:
+    tags: v*
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.run.name }} Build
+    runs-on: ${{ matrix.run.label }}
+    strategy:
+      matrix:
+        run:
+          - { ext: '', name: linux, os: linux, label: ubuntu-latest }
+          - { ext: '', name: macos, os: macos, label: macOS-latest }
+          - { ext: .exe, name: windows, os: windows, label: windows-latest }
+    steps:
+      - uses: actions/checkout@v2
+      - run: cargo install --all-features --path . --root install
+      - uses: actions/upload-artifact@v2
+        with:
+          if-no-files-found: error
+          name: ${{ matrix.run.name }}
+          path: install/bin/minecraft_downloader${{ matrix.run.ext }}
+
+  release:
+    name: Create release
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}"
+    steps:
+      - uses: actions/download-artifact@v2
+      - name: Calculate shas
+        run: |
+          find . -type f -exec shasum -a 256 {} \; >> /tmp/shasums_tmp
+          cat /tmp/shasums_tmp | awk -F'[./ ]' '{print $6"_"$5"="$1}' >> $GITHUB_ENV
+          cat /tmp/shasums_tmp | awk -F'[./ ]' '{print $1" "$6"_"$5}' >> shasums
+          cat shasums
+      - uses: actions/upload-artifact@v2
+        with:
+          if-no-files-found: error
+          name: shasums
+          path: shasums
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+          body: |
+            ## VirusToatal scans
+            [minecraft_downloader_linux](https://www.virustotal.com/en/file/${{ env.minecraft_downloader_linux }}/analysis)
+            [minecraft_downloader_macos](https://www.virustotal.com/en/file/${{ env.minecraft_downloader_macos }}/analysis)
+            [minecraft_downloader_windows.exe](https://www.virustotal.com/en/file/${{ env.minecraft_downloader_windows }}/analysis)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload:
+    name: Upload release artifacts
+    needs: release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        files:
+          - artifact: linux
+            file: ./linux/minecraft_downloader
+            mimetype: application/octet-stream
+            name: minecraft_downloader_linux
+          - artifact: macos
+            file: ./macos/minecraft_downloader
+            mimetype: application/octet-stream
+            name: minecraft_downloader_macos
+          - artifact: windows
+            name: minecraft_downloader_windows.exe
+            file: ./windows/minecraft_downloader.exe
+            mimetype: application/x-msdos-program
+          - artifact: shasums
+            name: shasums
+            file: ./shasums/shasums
+            mimetype: text/plain
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: ${{ matrix.files.artifact }}
+          path: ${{ matrix.files.artifact }}
+      - name: Scan ${{ matrix.files.artifact }} binary
+        run: >-
+          curl
+          --silent
+          --url https://www.virustotal.com/api/v3/files
+          --header "X-ApiKey: ${{ secrets.VIRUSTOTAL_API_KEY }}"
+          --form file=@${{ matrix.files.file }}
+          --output /dev/null
+      - name: Upload Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.upload_url }}
+          asset_path: ${{ matrix.files.file }}
+          asset_name: ${{ matrix.files.name }}
+          asset_content_type: ${{ matrix.files.mimetype }}
