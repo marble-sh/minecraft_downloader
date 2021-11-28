@@ -142,7 +142,7 @@ fn download_jar(file_name: &str, url: &str, sha: &str) {
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
-        .append(true)
+        .append(false)
         .open(file_name)
         .unwrap_or_else(|_| panic!("Failed to open {}", file_name));
 
