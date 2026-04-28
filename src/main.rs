@@ -1,15 +1,70 @@
+extern crate clap;
 extern crate crypto;
 extern crate reqwest;
 extern crate serde_json;
 
+use std::fmt::{Display, Formatter};
+use clap::{Parser, ValueEnum};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::args::{JarType, ReleaseType};
-
-mod args;
-
 const MANIFEST_URL: &str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
-const BUG_REPORT_URL: &str = "https://github.com/marblenix/minecraft_downloader/issues/new";
+const BUG_REPORT_URL: &str = "https://github.com/marble-sh/minecraft_downloader/issues/new";
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[allow(non_camel_case_types)]
+enum ReleaseType {
+    release,
+    snapshot
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[allow(non_camel_case_types)]
+enum JarType {
+    server,
+    client
+}
+
+impl Display for ReleaseType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReleaseType::release => write!(f, "release"),
+            ReleaseType::snapshot => write!(f, "snapshot")
+        }
+    }
+}
+impl Display for JarType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JarType::server => write!(f, "server"),
+            JarType::client => write!(f, "client")
+        }
+    }
+}
+
+#[derive(Parser)]
+#[command(about, author, long_about = None)]
+struct Args {
+    #[arg(short, long, long_help = "The specific version to download")]
+    version: Option<String>,
+
+    #[arg(short, long, default_value_t = ReleaseType::release, long_help = "The type of release to download")]
+    release_type: ReleaseType,
+
+    #[arg(short, long, default_value_t = JarType::server, long_help = "The type of jar to download")]
+    jar_type: JarType,
+
+    #[arg(short, long, long_help = "The path to save the jar file to")]
+    output: Option<String>,
+
+    #[arg(long, default_value_t = false, long_help = "Do not download the latest .jar, instead output only the found version")]
+    no_download: bool,
+
+    #[arg(long, default_value_t = false, long_help = "Do not overwrite the file on disk")]
+    no_overwrite: bool,
+
+    #[arg(short, long, default_value_t = false, long_help = "Silence everything but errors and necessary output")]
+    quiet: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,15 +127,8 @@ pub struct Server {
     pub url: String,
 }
 
-fn die(msg: String) {
-    use std::process::exit;
-
-    eprintln!("{}", msg);
-    exit(1);
-}
-
-fn print(msg: String) {
-    if !args::quiet() {
+fn print(quiet: bool, msg: String) {
+    if !quiet {
         println!("{}", msg);
     }
 }
@@ -98,11 +146,11 @@ impl Version {
 }
 
 impl Manifest {
-    pub fn find_by_id(&mut self, id: &str) -> Option<Version> {
+    fn find_by_id(&mut self, id: &str) -> Option<Version> {
         self.versions.sort_by_key(|probe| probe.id.clone());
         let result = &self.versions.binary_search_by_key(&id, |probe| probe.id.as_str());
 
-        return if result.is_ok() {
+        if result.is_ok() {
             let v = &self.versions.get(result.unwrap()).unwrap();
             Some(v.copy())
         } else {
@@ -110,12 +158,12 @@ impl Manifest {
         }
     }
 
-    pub fn get(&mut self, release_type: ReleaseType, version: &str) -> Option<Version> {
+    fn get(&mut self, release_type: ReleaseType, version: &str) -> Option<Version> {
         if version.ne("latest") {
             return self.find_by_id(version);
         }
 
-        return match release_type {
+        match release_type {
             ReleaseType::release => {
                 let latest = self.latest.release.clone();
                 self.find_by_id(latest.as_str())
@@ -124,7 +172,7 @@ impl Manifest {
                 let latest = self.latest.snapshot.clone();
                 self.find_by_id(latest.as_str())
             }
-        };
+        }
     }
 }
 
@@ -135,42 +183,29 @@ fn bug_report_url(title: &str, tag: &str) -> String {
     let tags = format!("bug,{}", tag);
 
     form_urlencoded::Serializer::new(BUG_REPORT_URL.to_string())
-        .append_pair("assignees", "marblenix")
+        .append_pair("assignees", "marble-sh")
         .append_pair("labels", tags.as_str())
         .append_pair("template", "bug_report.md")
         .append_pair("title", title)
         .finish()
 }
 
-fn download_jar(file_name: &str, size: i64, url: &str, sha: &str, no_overwrite: bool) {
-    use crypto::sha1::Sha1;
-    use std::{fs::OpenOptions, io::copy};
-    use std::path::Path;
-    use std::fs::File;
-    use std::io::Error;
+fn download_jar(file_name: &str, url: &str, sha: &str, no_overwrite: bool) {
     use bytes::buf::Buf;
     use crypto::digest::Digest;
+    use crypto::sha1::Sha1;
     use reqwest::blocking::Response;
-
-    let file_exists: bool = Path::new(file_name).exists();
-
-    if no_overwrite && file_exists {
-        eprintln!("Refusing to download {}, file already exists", file_name);
-        std::process::exit(0);
-    }
-
-    print(format!("Downloading {} bytes from {}...", size, url));
 
     let resp: Result<Response, reqwest::Error> = reqwest::blocking::get(url);
     if resp.is_err() {
         let error = resp.as_ref().err().unwrap().to_string();
-        die(format!("Failed to fetch jar file, {}", error));
+        panic!("Failed to fetch jar file, {}", error);
     }
 
     let bytes = resp.unwrap().bytes();
     if bytes.is_err() {
         let error = bytes.as_ref().err().unwrap().to_string();
-        die(format!("Failed to unwrap jar file, {}", error));
+        panic!("Failed to unwrap jar file, {}", error);
     }
 
     let jar: &[u8] = &*bytes.as_ref().unwrap();
@@ -178,31 +213,31 @@ fn download_jar(file_name: &str, size: i64, url: &str, sha: &str, no_overwrite: 
     let mut hasher: Sha1 = Sha1::new();
     hasher.input(jar);
     if sha != hasher.result_str() {
-        die(format!("Shasum check failed, please retry the download."));
+        panic!("Checksum mismatch, please retry the download.");
     }
 
-    let mut options = OpenOptions::new();
+    let mut options = std::fs::OpenOptions::new();
     if no_overwrite {
         options.create_new(true);
     } else {
         options.create(true);
     }
 
-    let file: Result<File, Error> = options
+    let file: Result<std::fs::File, std::io::Error> = options
         .write(true)
         .append(false)
         .open(file_name);
 
     if file.is_err() {
         let error: String = file.as_ref().err().unwrap().to_string();
-        die(format!("Failed to open {}\n{}", file_name, error));
+        panic!("Failed to open {}\n{}", file_name, error);
     }
 
-    let result: Result<u64, Error> = copy(&mut bytes.unwrap().reader(), &mut file.unwrap());
+    let result: Result<u64, std::io::Error> = std::io::copy(&mut bytes.unwrap().reader(), &mut file.unwrap());
 
     if result.is_err() {
         let error: String = result.as_ref().err().unwrap().to_string();
-        die(format!("Failed to write to disk, {}", error));
+        panic!("Failed to write to disk, {}", error);
     }
 }
 
@@ -212,7 +247,7 @@ fn get_manifest() -> Manifest {
     let manifest_result: Result<Response, reqwest::Error> = reqwest::blocking::get(MANIFEST_URL);
     if manifest_result.is_err() {
         let error = manifest_result.as_ref().err().unwrap().to_string();
-        die(format!("Failed to fetch manifest, {}", error));
+        panic!("Failed to fetch manifest, {}", error);
     }
 
     let manifest: Result<Manifest, reqwest::Error> = manifest_result.unwrap().json::<Manifest>();
@@ -220,7 +255,7 @@ fn get_manifest() -> Manifest {
         let error = manifest.as_ref().err().unwrap().to_string();
         let title = format!("Invalid Manifest - {}", error);
         let url = bug_report_url(title.as_str(), "manifest");
-        die(format!("Failed to parse json manifest, {}\n\nPlease file a bug report.\n{}", error, url));
+        panic!("Failed to parse json manifest, {}\n\nPlease file a bug report.\n{}", error, url);
     }
 
     return manifest.unwrap();
@@ -229,16 +264,10 @@ fn get_manifest() -> Manifest {
 fn get_release(version: &Version) -> Release {
     use reqwest::blocking::Response;
 
-    if args::no_download() {
-        println!("{}", version.id);
-        std::process::exit(0);
-    }
-
-    print(format!("Found Minecraft version {}", version.id));
     let versioned_manifest_result: Result<Response, reqwest::Error> = reqwest::blocking::get(&version.url);
     if versioned_manifest_result.is_err() {
         let error = versioned_manifest_result.as_ref().err().unwrap().to_string();
-        die(format!("Failed to download version manifest, {}", error));
+        panic!("Failed to download version manifest, {}", error);
     }
 
     let versioned_manifest: Result<Release, reqwest::Error> = versioned_manifest_result.unwrap().json::<Release>();
@@ -246,41 +275,43 @@ fn get_release(version: &Version) -> Release {
         let error = versioned_manifest.as_ref().err().unwrap().to_string();
         let title = format!("Invalid Versioned Manifest - {}", error);
         let url = bug_report_url(title.as_str(), "manifest");
-        die(format!("Failed to parse json manifest, {}\n\nPlease file a bug report.\n{}", error, url));
+        panic!("Failed to parse json manifest, {}\n\nPlease file a bug report.\n{}", error, url);
     }
 
     return versioned_manifest.unwrap();
 }
 
 fn main() {
-    args::init();
+    let args = Args::parse();
+    let version = args.version.unwrap_or("latest".to_string());
 
-    let release_type: ReleaseType = args::release_type();
-    let jar_type = args::jar_type();
-    let version = args::version().clone();
-    let output = args::output();
-
+    // Fetch the json file and look for the version
     let mut manifest = get_manifest();
-    let minecraft_version_opt: Option<Version> = manifest.get(release_type, version.as_str());
 
-    if minecraft_version_opt.is_none() {
-        die(format!("Version \"{}\" was not found in manifest", version));
+    let minecraft_version: Version = match manifest.get(args.release_type, version.as_str()) {
+        None => panic!("Version \"{}\" was not found in manifest", version),
+        Some(v) => v
+    };
+
+    if args.no_download {
+        println!("{}", minecraft_version.id);
+        std::process::exit(0);
     }
 
-    let minecraft_version: Version = minecraft_version_opt.unwrap();
+    print(args.quiet, format!("Found Minecraft version {}", minecraft_version.id));
     let release = get_release(&minecraft_version);
 
-    let file_name = match output {
-        None => format!("minecraft_{}_{}.jar", jar_type, minecraft_version.id),
+    let file_name = match args.output {
+        None => format!("minecraft_{}_{}.jar", args.jar_type, minecraft_version.id),
         Some(name) => name,
     };
 
-    print(format!("Saving jar file as {}", file_name));
+    print(args.quiet, format!("Saving jar file as {}", file_name));
 
     let size;
     let url;
     let sha;
-    match args::jar_type() {
+    match args.jar_type {
         JarType::server => {
             size = release.downloads.server.size;
             url = release.downloads.server.url.as_str();
@@ -292,12 +323,19 @@ fn main() {
             sha = release.downloads.client.sha1.as_str();
         }
     }
+
+    let file_exists: bool = std::path::Path::new(file_name.as_str()).exists();
+    if args.no_overwrite && file_exists {
+        eprintln!("Refusing to download {}, file already exists", file_name);
+        std::process::exit(0);
+    }
+
+    print(args.quiet, format!("Downloading {} bytes from {}...", size, url));
     download_jar(
         file_name.as_str(),
-        size,
         url,
         sha,
-        args::no_overwrite(),
+        args.no_overwrite,
     );
 }
 
